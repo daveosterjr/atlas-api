@@ -19,8 +19,7 @@ use CodeIgniter\Config\BaseService;
  * method format you should use for your service methods. For more examples,
  * see the core Services file at system/Config/Services.php.
  */
-class Services extends BaseService
-{
+class Services extends BaseService {
     /*
      * public static function example($getShared = true)
      * {
@@ -36,46 +35,39 @@ class Services extends BaseService
      * Return an instance of the LLMService
      *
      * @param bool $getShared
-     * @param string $apiKey
-     * @param string $provider
-     * @param string $defaultModel
-     * @return LLMService
+     * @param mixed $config Optional configuration
+     * @return \App\Libraries\LLM\LLMService
      */
-    public static function llm($getShared = true, ?string $apiKey = null, string $provider = 'openai', string $defaultModel = 'gpt-4o-mini')
-    {
+    public static function llm($getShared = true, $config = null) {
         if ($getShared) {
-            return static::getSharedInstance('llm', $apiKey, $provider, $defaultModel);
+            return static::getSharedInstance('llm', $config);
         }
 
-        // Get API key from environment if not provided
-        $apiKey = $apiKey ?? getenv('LLM_API_KEY');
-        
-        return new LLMService($apiKey, $provider, $defaultModel);
+        // Ensure we have a proper config object
+        if (!($config instanceof \App\Config\LLM) && $config !== false) {
+            $config = null;
+        }
+
+        return new \App\Libraries\LLM\LLMService($config);
     }
 
     /**
      * Return an instance of the ElasticSearchService
      *
      * @param bool $getShared
-     * @param array|null $config
-     * @param string $provider
-     * @param string $defaultIndex
-     * @return ElasticSearchService
+     * @param mixed $config Optional configuration
+     * @return \App\Libraries\ElasticSearch\ElasticSearchService
      */
-    public static function elasticsearch($getShared = true, ?array $config = null, string $provider = 'elasticsearch', string $defaultIndex = 'properties')
-    {
+    public static function elasticsearch($getShared = true, $config = null) {
         if ($getShared) {
-            return static::getSharedInstance('elasticsearch', $config, $provider, $defaultIndex);
+            return static::getSharedInstance('elasticsearch', $config);
         }
 
-        // Get config from environment if not provided
-        if ($config === null) {
-            $config = [
-                'host' => getenv('ES_HOST') ?: 'localhost:9200',
-                'api_key' => getenv('ES_API_KEY') ?: ''
-            ];
+        // Ensure we have a proper config object
+        if (!($config instanceof \App\Config\ElasticSearch) && $config !== false) {
+            $config = null;
         }
-        
-        return new ElasticSearchService($config, $provider, $defaultIndex);
+
+        return new \App\Libraries\ElasticSearch\ElasticSearchService($config);
     }
 }

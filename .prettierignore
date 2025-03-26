@@ -1,0 +1,15 @@
+# Ignore vendor dependencies
+/vendor/
+
+# Ignore build artifacts
+/writable/
+/builds/
+
+# Ignore specific files
+composer.lock
+*.min.js
+*.min.css
+
+# Ignore specific directories
+node_modules/
+.git/ 

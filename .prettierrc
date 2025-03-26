@@ -1,0 +1,15 @@
+{
+  "printWidth": 100,
+  "tabWidth": 4,
+  "useTabs": false,
+  "semi": true,
+  "singleQuote": true,
+  "trailingComma": "none",
+  "bracketSpacing": true,
+  "arrowParens": "avoid",
+  "phpVersion": "8.0",
+  "braceStyle": "1tbs",
+  "endOfLine": "lf",
+  "htmlWhitespaceSensitivity": "css",
+  "plugins": ["@prettier/plugin-php"]
+} 

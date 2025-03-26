@@ -24,7 +24,13 @@ class ElasticSearchProvider implements ElasticSearchProviderInterface
      */
     public function initialize(array $config): void
     {
-        $builder = ClientBuilder::create();
+        // Ensure Elasticsearch client builder class is loaded
+        if (!class_exists('\\Elastic\\Elasticsearch\\ClientBuilder')) {
+            // Try loading from vendor directly if autoloading fails
+            require_once ROOTPATH . 'vendor/elasticsearch/elasticsearch/src/ClientBuilder.php';
+        }
+        
+        $builder = \Elastic\Elasticsearch\ClientBuilder::create();
         
         if (isset($config['host'])) {
             $builder->setHosts([$config['host']]);

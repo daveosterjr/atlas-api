@@ -1,0 +1,21 @@
+{
+  "name": "atlas-api",
+  "version": "1.0.0",
+  "description": "## What is CodeIgniter?",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "format": "prettier --write \"**/*.{php,css,js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{php,css,js,json,md}\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@prettier/plugin-php": "^0.22.4",
+    "prettier": "^3.5.3"
+  }
+}
