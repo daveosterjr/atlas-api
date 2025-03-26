@@ -34,7 +34,7 @@ class Prompt extends ResourceController {
 
     public function index() {
         // Handle both POST and GET requests for flexibility
-        if ($this->request->getMethod() === 'post') {
+        if ($this->request->getMethod() === 'POST') {
             // Get JSON data from POST request
             $data = $this->request->getJSON(true);
             $prompt = $data['prompt'] ?? '';
@@ -140,7 +140,7 @@ class Prompt extends ResourceController {
                 case 'individual_person':
                     // Handle individual person search
                     $actionTaken = [
-                        'action' => 'person_profile_search',
+                        'action_type' => 'person_profile_search',
                         'details' => 'Searching for individual person profile',
                     ];
                     break;
@@ -153,7 +153,7 @@ class Prompt extends ResourceController {
                 case 'individual_company':
                     // Handle individual company search
                     $actionTaken = [
-                        'action' => 'company_profile_search',
+                        'action_type' => 'company_profile_search',
                         'details' => 'Searching for company information',
                     ];
                     break;
@@ -161,7 +161,7 @@ class Prompt extends ResourceController {
                 case 'multiple_properties':
                     // Handle multiple properties search
                     $actionTaken = [
-                        'action' => 'property_list_filter',
+                        'action_type' => 'property_list_filter',
                         'details' => 'Filtering property listings based on criteria',
                     ];
                     break;
@@ -169,7 +169,7 @@ class Prompt extends ResourceController {
                 case 'multiple_people':
                     // Handle multiple people search
                     $actionTaken = [
-                        'action' => 'people_search',
+                        'action_type' => 'people_search',
                         'details' => 'Searching for multiple individuals',
                     ];
                     break;
@@ -177,7 +177,7 @@ class Prompt extends ResourceController {
                 case 'multiple_companies':
                     // Handle multiple companies search
                     $actionTaken = [
-                        'action' => 'company_list_filter',
+                        'action_type' => 'company_list_filter',
                         'details' => 'Filtering company listings based on criteria',
                     ];
                     break;
@@ -186,7 +186,7 @@ class Prompt extends ResourceController {
                 default:
                     // Handle other search types
                     $actionTaken = [
-                        'action' => 'general_search',
+                        'action_type' => 'general_search',
                         'details' => 'Performing general search with provided criteria',
                     ];
                     break;
@@ -263,14 +263,76 @@ class Prompt extends ResourceController {
         // Perform the search with lenient settings
         $searchResults = $this->esService->autocompleteProperty($prompt, null, $searchOptions);
 
+        // Generate a fun message about the search results
+        $aiMessage = $this->generatePropertySearchMessage($prompt, $searchResults);
+
         return [
-            'action' => 'property_lookup',
+            'action_type' => 'property_lookup',
             'details' => 'Looking up specific property details',
             'address' => [
                 'original' => $prompt,
             ],
             'search_results' => $searchResults,
+            'ai_message' => $aiMessage,
         ];
+    }
+
+    /**
+     * Generate a fun, personalized message about property search results
+     *
+     * @param string $prompt The original search prompt
+     * @param array $searchResults The search results from ElasticSearch
+     * @return string A fun message with personality
+     */
+    private function generatePropertySearchMessage(string $prompt, array $searchResults): string {
+        // Check if we found any results - based on actual structure
+        $foundProperty = !empty($searchResults) && is_array($searchResults);
+
+        // Get confidence score and address if available
+        $confidence = 0;
+        $propertyAddress = '';
+        if ($foundProperty && count($searchResults) > 0) {
+            $topHit = $searchResults[0];
+            $confidence = $topHit['score'] ?? 0;
+            $propertyAddress = $topHit['text'] ?? 'this property';
+        }
+
+        // Normalize confidence to 0-100%
+        $confidencePercent = min(round(($confidence / 10000) * 100), 100);
+
+        try {
+            // Set up system prompt for the AI
+            $systemPrompt = 'You are a helpful AI assistant. You help users find properties.';
+            $this->llmService->setSystemPrompt($systemPrompt);
+            $this->llmService->setModel('gpt-4o-mini');
+            $this->llmService->setTemperature(0.7); // More creative
+            $this->llmService->setMaxTokens(100); // Keep it concise
+
+            // Create user message with search context
+            $userMessage = '';
+            if ($foundProperty) {
+                $userMessage = "You searched for a property based on my query: \"$prompt\". You found a property at \"$propertyAddress\". Generate a short message (1 sentences) about this result.";
+            } else {
+                $userMessage = "You searched for a property based on my query: \"$prompt\", but you couldn't find any matches. Generate a short message (1 sentence) about not finding any results. Make it slightly apologetic but encouraging to try again with a more specific query. Be brief!";
+            }
+
+            // Use the ask method which handles the conversation
+            $aiMessage = $this->llmService->ask($userMessage);
+
+            if (!empty($aiMessage)) {
+                return trim($aiMessage);
+            }
+        } catch (Exception $e) {
+            // Log the error but don't expose it
+            log_message('error', 'Error generating AI message: ' . $e->getMessage());
+        }
+
+        // Return a fallback message if anything fails
+        if ($foundProperty) {
+            return "Found $propertyAddress with $confidencePercent% confidence!";
+        } else {
+            return "Hmm, couldn't find that property. Could you be more specific?";
+        }
     }
 
     public function options() {
