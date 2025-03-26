@@ -272,4 +272,19 @@ class Prompt extends ResourceController {
             'search_results' => $searchResults,
         ];
     }
+
+    public function options() {
+        $this->response->setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
+        $this->response->setHeader(
+            'Access-Control-Allow-Headers',
+            'Origin, X-Requested-With, Content-Type, Accept, Authorization, Access-Control-Request-Method, Access-Control-Request-Headers',
+        );
+        $this->response->setHeader(
+            'Access-Control-Allow-Methods',
+            'GET, POST, OPTIONS, PUT, DELETE, PATCH',
+        );
+        $this->response->setHeader('Access-Control-Allow-Credentials', 'true');
+        $this->response->setHeader('Access-Control-Max-Age', '7200');
+        return $this->response->setStatusCode(200);
+    }
 }
