@@ -12,4 +12,5 @@ $routes->group('api', ['namespace' => 'App\Controllers\Api'], function ($routes)
     $routes->get('filters', 'Filters::index');
     $routes->get('autocomplete', 'Autocomplete::index');
     $routes->match(['get', 'post', 'options'], 'prompt', 'Prompt::index');
+    $routes->get('properties/(:segment)', 'Properties::getProperty/$1');
 });

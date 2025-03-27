@@ -7,12 +7,20 @@ use App\Libraries\LLMService\LLMService;
 use App\Libraries\ElasticSearch\ElasticSearchService;
 use App\Config\LLM;
 use App\Config\ElasticSearch;
+use App\Handlers\Prompt\DefaultHandler;
+use App\Handlers\Prompt\IndividualPropertyHandler;
+use App\Handlers\Prompt\IndividualPersonHandler;
+use App\Handlers\Prompt\IndividualCompanyHandler;
+use App\Handlers\Prompt\MultiplePropertiesHandler;
+use App\Handlers\Prompt\MultiplePeopleHandler;
+use App\Handlers\Prompt\MultipleCompaniesHandler;
 use Exception;
 
 class Prompt extends ResourceController {
     protected $format = 'json';
     private $llmService;
     private $esService;
+    private $handlers = [];
 
     public function initController(
         \CodeIgniter\HTTP\RequestInterface $request,
@@ -30,6 +38,35 @@ class Prompt extends ResourceController {
 
         // Create ElasticSearch service
         $this->esService = new ElasticSearchService(new ElasticSearch());
+
+        // Initialize handlers
+        $this->initHandlers();
+    }
+
+    /**
+     * Initialize all the prompt handlers
+     */
+    private function initHandlers() {
+        $this->handlers = [
+            'individual_person' => new IndividualPersonHandler($this->llmService, $this->esService),
+            'individual_property' => new IndividualPropertyHandler(
+                $this->llmService,
+                $this->esService,
+            ),
+            'individual_company' => new IndividualCompanyHandler(
+                $this->llmService,
+                $this->esService,
+            ),
+            'multiple_properties' => new MultiplePropertiesHandler(
+                $this->llmService,
+                $this->esService,
+            ),
+            'multiple_people' => new MultiplePeopleHandler($this->llmService, $this->esService),
+            'multiple_companies' => new MultipleCompaniesHandler(
+                $this->llmService,
+                $this->esService,
+            ),
+        ];
     }
 
     public function index() {
@@ -58,9 +95,6 @@ class Prompt extends ResourceController {
         try {
             // Add debug info
             $config = new LLM();
-            log_message('debug', 'API key set: ' . (!empty($config->apiKey) ? 'Yes' : 'No'));
-            log_message('debug', 'LLM Provider: ' . $config->provider);
-            log_message('debug', 'Default Model: ' . $config->defaultModel);
 
             // Explicitly set model to GPT-4o
             $this->llmService->setModel('gpt-4o');
@@ -134,63 +168,12 @@ class Prompt extends ResourceController {
                 throw new Exception('Failed to parse category from LLM response');
             }
 
-            // Define action based on category
-            $actionTaken = [];
-            switch ($result['category']) {
-                case 'individual_person':
-                    // Handle individual person search
-                    $actionTaken = [
-                        'action_type' => 'person_profile_search',
-                        'details' => 'Searching for individual person profile',
-                    ];
-                    break;
+            // Get the appropriate handler for this category
+            $category = $result['category'];
+            $handler = $this->handlers[$category] ?? new DefaultHandler();
 
-                case 'individual_property':
-                    // Handle individual property search - complete address using LLM
-                    $actionTaken = $this->handlePropertySearch($prompt);
-                    break;
-
-                case 'individual_company':
-                    // Handle individual company search
-                    $actionTaken = [
-                        'action_type' => 'company_profile_search',
-                        'details' => 'Searching for company information',
-                    ];
-                    break;
-
-                case 'multiple_properties':
-                    // Handle multiple properties search
-                    $actionTaken = [
-                        'action_type' => 'property_list_filter',
-                        'details' => 'Filtering property listings based on criteria',
-                    ];
-                    break;
-
-                case 'multiple_people':
-                    // Handle multiple people search
-                    $actionTaken = [
-                        'action_type' => 'people_search',
-                        'details' => 'Searching for multiple individuals',
-                    ];
-                    break;
-
-                case 'multiple_companies':
-                    // Handle multiple companies search
-                    $actionTaken = [
-                        'action_type' => 'company_list_filter',
-                        'details' => 'Filtering company listings based on criteria',
-                    ];
-                    break;
-
-                case 'other':
-                default:
-                    // Handle other search types
-                    $actionTaken = [
-                        'action_type' => 'general_search',
-                        'details' => 'Performing general search with provided criteria',
-                    ];
-                    break;
-            }
+            // Use the handler to process the prompt
+            $actionTaken = $handler->handle($prompt);
 
             // Create standard API response structure
             $response = [
@@ -240,113 +223,5 @@ class Prompt extends ResourceController {
 
             return $this->respond($response, 500);
         }
-    }
-
-    /**
-     * Handle property search functionality
-     *
-     * @param string $prompt The original prompt
-     * @return array The action result
-     */
-    private function handlePropertySearch(string $prompt): array {
-        // Configure the service with lenient search settings
-        $this->esService->setLimit(1)->setScoreThreshold(0.3);
-
-        // Use directly lenient search settings
-        $searchOptions = [
-            'fuzziness' => 'AUTO:1,4', // Maximum fuzziness from the start
-            'prefix_length' => 1, // Very small prefix requirement
-            'minimum_should_match' => '20%', // Low match requirement
-            'slop' => 3, // High slop for phrase matching
-        ];
-
-        // Perform the search with lenient settings
-        $searchResults = $this->esService->autocompleteProperty($prompt, null, $searchOptions);
-
-        // Generate a fun message about the search results
-        $aiMessage = $this->generatePropertySearchMessage($prompt, $searchResults);
-
-        return [
-            'action_type' => 'property_lookup',
-            'details' => 'Looking up specific property details',
-            'address' => [
-                'original' => $prompt,
-            ],
-            'search_results' => $searchResults,
-            'ai_message' => $aiMessage,
-        ];
-    }
-
-    /**
-     * Generate a fun, personalized message about property search results
-     *
-     * @param string $prompt The original search prompt
-     * @param array $searchResults The search results from ElasticSearch
-     * @return string A fun message with personality
-     */
-    private function generatePropertySearchMessage(string $prompt, array $searchResults): string {
-        // Check if we found any results - based on actual structure
-        $foundProperty = !empty($searchResults) && is_array($searchResults);
-
-        // Get confidence score and address if available
-        $confidence = 0;
-        $propertyAddress = '';
-        if ($foundProperty && count($searchResults) > 0) {
-            $topHit = $searchResults[0];
-            $confidence = $topHit['score'] ?? 0;
-            $propertyAddress = $topHit['text'] ?? 'this property';
-        }
-
-        // Normalize confidence to 0-100%
-        $confidencePercent = min(round(($confidence / 10000) * 100), 100);
-
-        try {
-            // Set up system prompt for the AI
-            $systemPrompt = 'You are a helpful AI assistant. You help users find properties.';
-            $this->llmService->setSystemPrompt($systemPrompt);
-            $this->llmService->setModel('gpt-4o-mini');
-            $this->llmService->setTemperature(0.7); // More creative
-            $this->llmService->setMaxTokens(100); // Keep it concise
-
-            // Create user message with search context
-            $userMessage = '';
-            if ($foundProperty) {
-                $userMessage = "You searched for a property based on my query: \"$prompt\". You found a property at \"$propertyAddress\". Generate a short message (1 sentences) about this result.";
-            } else {
-                $userMessage = "You searched for a property based on my query: \"$prompt\", but you couldn't find any matches. Generate a short message (1 sentence) about not finding any results. Make it slightly apologetic but encouraging to try again with a more specific query. Be brief!";
-            }
-
-            // Use the ask method which handles the conversation
-            $aiMessage = $this->llmService->ask($userMessage);
-
-            if (!empty($aiMessage)) {
-                return trim($aiMessage);
-            }
-        } catch (Exception $e) {
-            // Log the error but don't expose it
-            log_message('error', 'Error generating AI message: ' . $e->getMessage());
-        }
-
-        // Return a fallback message if anything fails
-        if ($foundProperty) {
-            return "Found $propertyAddress with $confidencePercent% confidence!";
-        } else {
-            return "Hmm, couldn't find that property. Could you be more specific?";
-        }
-    }
-
-    public function options() {
-        $this->response->setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
-        $this->response->setHeader(
-            'Access-Control-Allow-Headers',
-            'Origin, X-Requested-With, Content-Type, Accept, Authorization, Access-Control-Request-Method, Access-Control-Request-Headers',
-        );
-        $this->response->setHeader(
-            'Access-Control-Allow-Methods',
-            'GET, POST, OPTIONS, PUT, DELETE, PATCH',
-        );
-        $this->response->setHeader('Access-Control-Allow-Credentials', 'true');
-        $this->response->setHeader('Access-Control-Max-Age', '7200');
-        return $this->response->setStatusCode(200);
     }
 }
