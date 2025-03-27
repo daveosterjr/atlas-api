@@ -167,9 +167,9 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
      * @param string $prompt The original prompt
      * @return array The action result
      */
-    public function handle(string $prompt): array {
+    public function handle(string $prompt, array $appliedFilters = []): array {
         $filters = AllFilters::getPropertyFilters();
-        $criteriaData = $this->extractSearchCriteria($prompt, $filters);
+        $criteriaData = $this->extractSearchCriteria($prompt, $filters, $appliedFilters);
 
         return [
             'action_type' => 'get_properties_filters',
@@ -191,11 +191,15 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
      * @param array $availableFilters List of available filters
      * @return array Extracted search criteria
      */
-    private function extractSearchCriteria(string $prompt, array $availableFilters): array {
+    private function extractSearchCriteria(
+        string $prompt,
+        array $availableFilters,
+        array $appliedFilters = [],
+    ): array {
         try {
             // Configure LLM settings for filter extraction
             $this->llmService->setSystemPrompt(
-                $this->getFilterExtractionSystemPrompt($availableFilters),
+                $this->getFilterExtractionSystemPrompt($availableFilters, $appliedFilters),
             );
             $this->llmService->setModel('gpt-4o');
             $this->llmService->setMaxTokens(2000);
@@ -231,7 +235,9 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
                     'matched' => '',
                     'unmatched' => 'No filters matched.',
                 ];
-                $searchName = $response['search_name'] ?? $this->generateDefaultSearchName($prompt);
+                $searchName =
+                    $response['search_name'] ??
+                    $this->generateDefaultSearchName($prompt, $appliedFilters);
 
                 // Handle response format - extract the items array if needed
                 if (
@@ -243,19 +249,55 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
                     $filters = $filters['items'];
                 }
 
-                $validatedFilters = $this->validateFilters($filters, $availableFilters);
+                // Process filters - merge with applied filters and handle updates
+                $mergedFilters = $this->validateAndMergeFilters(
+                    $filters,
+                    $availableFilters,
+                    $appliedFilters,
+                );
+
+                // Get counts of new and updated filters for reporting
+                $newFilterCount = 0;
+                $updatedFilterCount = 0;
+                $appliedFilterIds = [];
+
+                foreach ($appliedFilters as $filter) {
+                    if (isset($filter['id'])) {
+                        $appliedFilterIds[$filter['id']] = true;
+                    }
+                }
+
+                foreach ($filters as $filter) {
+                    if (isset($filter['id'])) {
+                        if (isset($appliedFilterIds[$filter['id']])) {
+                            $updatedFilterCount++;
+                        } else {
+                            $newFilterCount++;
+                        }
+                    }
+                }
 
                 // Generate a random search ID (for dummy data)
                 $searchId = 'search_' . uniqid();
 
-                return [
+                $result = [
                     'search_type' => 'multiple_properties',
                     'search_id' => $searchId,
                     'search_name' => $searchName,
-                    'extracted_criteria' => $validatedFilters,
-                    'filter_count' => count($validatedFilters),
+                    'extracted_criteria' => $mergedFilters,
+                    'filter_count' => count($mergedFilters),
+                    'new_filter_count' => $newFilterCount,
+                    'updated_filter_count' => $updatedFilterCount,
                     'explanation' => $explanation,
+                    'applied_filters_count' => count($appliedFilters),
                 ];
+
+                // Add original filters for reference/debugging
+                if (!empty($filters)) {
+                    $result['new_filters'] = $filters;
+                }
+
+                return $result;
             } catch (Exception $jsonError) {
                 // Fallback to regular ask and manual parsing if JSON structured output fails
                 Log::warning(
@@ -275,7 +317,8 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
                         'unmatched' => 'No filters matched.',
                     ];
                     $searchName =
-                        $extractedJson['search_name'] ?? $this->generateDefaultSearchName($prompt);
+                        $extractedJson['search_name'] ??
+                        $this->generateDefaultSearchName($prompt, $appliedFilters);
 
                     // We don't need to format the explanation, we'll return the raw object structure
                 } catch (Exception $e) {
@@ -298,7 +341,7 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
                         ];
                     }
 
-                    $searchName = $this->generateDefaultSearchName($prompt);
+                    $searchName = $this->generateDefaultSearchName($prompt, $appliedFilters);
                 }
 
                 // Handle response format - extract the items array if needed
@@ -311,22 +354,57 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
                     $filters = $filters['items'];
                 }
 
-                // Validate filters
-                $validatedFilters = $this->validateFilters($filters, $availableFilters);
+                // Process filters - merge with applied filters and handle updates
+                $mergedFilters = $this->validateAndMergeFilters(
+                    $filters,
+                    $availableFilters,
+                    $appliedFilters,
+                );
+
+                // Get counts of new and updated filters for reporting
+                $newFilterCount = 0;
+                $updatedFilterCount = 0;
+                $appliedFilterIds = [];
+
+                foreach ($appliedFilters as $filter) {
+                    if (isset($filter['id'])) {
+                        $appliedFilterIds[$filter['id']] = true;
+                    }
+                }
+
+                foreach ($filters as $filter) {
+                    if (isset($filter['id'])) {
+                        if (isset($appliedFilterIds[$filter['id']])) {
+                            $updatedFilterCount++;
+                        } else {
+                            $newFilterCount++;
+                        }
+                    }
+                }
 
                 // Generate a random search ID (for dummy data)
                 $searchId = 'search_' . uniqid();
 
-                return [
+                $result = [
                     'search_type' => 'multiple_properties',
                     'search_id' => $searchId,
                     'search_name' => $searchName,
-                    'extracted_criteria' => $validatedFilters,
+                    'extracted_criteria' => $mergedFilters,
                     'raw_llm_response' => $llmResponse,
                     'used_fallback' => true,
-                    'filter_count' => count($validatedFilters),
+                    'filter_count' => count($mergedFilters),
+                    'new_filter_count' => $newFilterCount,
+                    'updated_filter_count' => $updatedFilterCount,
                     'explanation' => $explanation,
+                    'applied_filters_count' => count($appliedFilters),
                 ];
+
+                // Add original filters for reference/debugging
+                if (!empty($filters)) {
+                    $result['new_filters'] = $filters;
+                }
+
+                return $result;
             }
         } catch (Exception $e) {
             Log::error('Error extracting search criteria: ' . $e->getMessage());
@@ -349,16 +427,20 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
 
             // Generate a random search ID (for dummy data)
             $searchId = 'search_' . uniqid();
-            $searchName = $this->generateDefaultSearchName($prompt);
+            $searchName = $this->generateDefaultSearchName($prompt, $appliedFilters);
 
             return [
                 'search_type' => 'multiple_properties',
                 'search_id' => $searchId,
                 'search_name' => $searchName,
-                'extracted_criteria' => [],
+                'extracted_criteria' => $appliedFilters, // Return just the applied filters if there's an error
                 'error' => $e->getMessage(),
                 'error_details' => app()->environment() !== 'production' ? $errorDetails : null,
+                'filter_count' => count($appliedFilters),
+                'new_filter_count' => 0,
+                'updated_filter_count' => 0,
                 'explanation' => $explanation,
+                'applied_filters_count' => count($appliedFilters),
             ];
         }
     }
@@ -367,11 +449,20 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
      * Generate system prompt for filter extraction
      *
      * @param array $availableFilters List of available filters
+     * @param array $appliedFilters List of applied filters
      * @return string System prompt for LLM
      */
-    private function getFilterExtractionSystemPrompt(array $availableFilters): string {
+    private function getFilterExtractionSystemPrompt(
+        array $availableFilters,
+        array $appliedFilters = [],
+    ): string {
         $filterDetails = json_encode($availableFilters, JSON_PRETTY_PRINT);
         $schemaDetails = json_encode($this->filterSchema, JSON_PRETTY_PRINT);
+
+        // Create a pretty-printed version of already applied filters
+        $appliedFiltersJson = empty($appliedFilters)
+            ? 'None'
+            : json_encode($appliedFilters, JSON_PRETTY_PRINT);
 
         return <<<EOT
         You are a specialized AI designed to extract property search filters from natural language queries.
@@ -379,6 +470,9 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
 
         AVAILABLE FILTERS:
         $filterDetails
+
+        ALREADY APPLIED FILTERS:
+        $appliedFiltersJson
 
         FILTER SCHEMA:
         $schemaDetails
@@ -424,6 +518,31 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
            - This name should be unique and clearly describe what property characteristics the search is looking for
            - It should be brief but descriptive (3-7 words)
            - Examples: "Luxury Beach Homes", "Family-Friendly Suburbs", "Downtown Condos Under 500K"
+           - CRITICAL: You MUST analyze the ALREADY APPLIED FILTERS and incorporate their key characteristics into the search name
+           - IMPORTANT: The search name should reflect ALL filters that will be applied (both existing and new)
+           - For example, if applied filters include "3 bedrooms" and the new query adds "near downtown",
+             the name should be something like "3 Bedroom Homes Near Downtown" (not just "Homes Near Downtown")
+
+        HANDLING ALREADY APPLIED FILTERS:
+        1. DO NOT create new filters that duplicate any already applied filters
+        2. If the user's query mentions updating an already applied filter (e.g., changing price range),
+           provide an updated version of that filter in your output
+        3. When updating a filter, match its ID and type, but provide the new filterType and value
+        4. You MUST consider the content of both applied and new/updated filters when creating the search name
+        5. If a user's query mentions criteria that are already filtered, acknowledge this in your explanation
+        6. Indicate in your explanation when you're updating an existing filter rather than adding a new one
+
+        SEARCH NAME REQUIREMENTS:
+        1. Analyze ALL filters - both already applied and new/updated ones from the current query
+        2. Identify the most important/distinctive criteria from all filters (applied and new)
+        3. Create a name that describes the COMPLETE search (not just the new part)
+        4. If ALREADY APPLIED FILTERS exist, they MUST be represented in the search name
+        5. The name should make sense for the entire collection of filters, not just the new ones
+
+        FILTER UPDATE EXAMPLES:
+        - If a filter for bedrooms with value 2 exists and user asks for 3 bedrooms, update the existing filter
+        - If a price range of $200k-$300k exists and user wants $250k-$350k, update the existing price filter
+        - If a neighborhood filter exists and user wants to add another neighborhood, update the multiselect filter
 
         Both explanation sections should be extremely concise (just a few words or a short phrase each).
         No introductory text or phrases like "Based on your query." Direct and to the point.
@@ -476,11 +595,34 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
      *
      * @param array $filters Filters to validate
      * @param array $availableFilters List of available filters
+     * @param array $appliedFilters List of applied filters
      * @return array Validated filters
      */
-    private function validateFilters(array $filters, array $availableFilters): array {
+    private function validateAndMergeFilters(
+        array $filters,
+        array $availableFilters,
+        array $appliedFilters = [],
+    ): array {
         $validatedFilters = [];
         $validFilterIds = array_column($availableFilters, 'id');
+
+        // Track filter IDs and types that are already applied
+        $appliedFilterMap = [];
+        $usedAppliedFilterKeys = [];
+
+        foreach ($appliedFilters as $filter) {
+            if (isset($filter['id'], $filter['filterType'])) {
+                $key = $filter['id'] . '_' . $filter['filterType'];
+                $appliedFilterMap[$key] = $filter;
+
+                // Also store by just ID to check for updates to the same filter with different filterType
+                $idKey = $filter['id'];
+                if (!isset($appliedFilterMap['id_' . $idKey])) {
+                    $appliedFilterMap['id_' . $idKey] = [];
+                }
+                $appliedFilterMap['id_' . $idKey][] = $filter;
+            }
+        }
 
         foreach ($filters as $filter) {
             // Skip if filter doesn't have required fields
@@ -510,6 +652,31 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
             // Check source type is properties
             if ($filter['source_type'] !== 'properties') {
                 continue;
+            }
+
+            // Generate key for checking if this filter already exists
+            $key = $filter['id'] . '_' . $filter['filterType'];
+            $idKey = 'id_' . $filter['id'];
+
+            // Check if this is an update to an existing filter
+            $isUpdateToExistingFilter = false;
+
+            // Check for exact match (same ID and filterType)
+            if (isset($appliedFilterMap[$key])) {
+                // This appears to be an update to an existing filter
+                $isUpdateToExistingFilter = true;
+                $usedAppliedFilterKeys[] = $key;
+            }
+            // Check for an update that changes the filterType but keeps the same ID
+            elseif (isset($appliedFilterMap[$idKey]) && !empty($appliedFilterMap[$idKey])) {
+                // This is potentially updating a filter but changing its filterType
+                $isUpdateToExistingFilter = true;
+
+                // Mark all filters with this ID as used
+                foreach ($appliedFilterMap[$idKey] as $existingFilter) {
+                    $existingKey = $existingFilter['id'] . '_' . $existingFilter['filterType'];
+                    $usedAppliedFilterKeys[] = $existingKey;
+                }
             }
 
             // Add timestamp if missing
@@ -544,11 +711,57 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
             if ($isValid) {
                 // Enrich the filter with properties from available filters
                 $filter = $this->enrichFilterWithAvailableProperties($filter, $availableFilters);
+
+                // If this is updating an existing filter, copy any additional properties not specified in the update
+                if ($isUpdateToExistingFilter && isset($appliedFilterMap[$key])) {
+                    $filter = $this->preserveAdditionalProperties($filter, $appliedFilterMap[$key]);
+                } elseif ($isUpdateToExistingFilter && isset($appliedFilterMap[$idKey])) {
+                    // If we're changing filterType, use the first matching filter by ID
+                    $filter = $this->preserveAdditionalProperties(
+                        $filter,
+                        $appliedFilterMap[$idKey][0],
+                    );
+                }
+
                 $validatedFilters[] = $filter;
             }
         }
 
+        // Add all applied filters that weren't updated
+        foreach ($appliedFilters as $appliedFilter) {
+            if (isset($appliedFilter['id'], $appliedFilter['filterType'])) {
+                $key = $appliedFilter['id'] . '_' . $appliedFilter['filterType'];
+
+                // Only add this filter if it wasn't updated
+                if (!in_array($key, $usedAppliedFilterKeys)) {
+                    $validatedFilters[] = $appliedFilter;
+                }
+            }
+        }
+
         return $validatedFilters;
+    }
+
+    /**
+     * Preserve additional properties from an existing filter that aren't specified in the update
+     *
+     * @param array $newFilter The new filter with updated values
+     * @param array $existingFilter The existing filter to preserve properties from
+     * @return array The merged filter
+     */
+    private function preserveAdditionalProperties(array $newFilter, array $existingFilter): array {
+        // Core properties that are expected to change in an update
+        $updatableProperties = ['filterType', 'value', 'timestamp'];
+
+        // Copy all properties from existing filter that aren't in the updatable list
+        // and aren't already set in the new filter
+        foreach ($existingFilter as $key => $value) {
+            if (!in_array($key, $updatableProperties) && !isset($newFilter[$key])) {
+                $newFilter[$key] = $value;
+            }
+        }
+
+        return $newFilter;
     }
 
     /**
@@ -850,15 +1063,22 @@ class MultiplePropertiesHandler implements PromptHandlerInterface {
      * Generate a default search name based on the prompt
      *
      * @param string $prompt The user's search prompt
+     * @param array $appliedFilters List of applied filters
      * @return string A default search name
      */
-    private function generateDefaultSearchName(string $prompt): string {
+    private function generateDefaultSearchName(string $prompt, array $appliedFilters = []): string {
         // Truncate prompt if too long
         $truncatedPrompt = substr($prompt, 0, 30);
         if (strlen($prompt) > 30) {
             $truncatedPrompt .= '...';
         }
 
-        return 'Property Search: ' . $truncatedPrompt;
+        // If we have applied filters, add a count to the name
+        $prefix = 'Property Search';
+        if (!empty($appliedFilters)) {
+            $prefix = 'Property Search (' . count($appliedFilters) . ' filters)';
+        }
+
+        return $prefix . ': ' . $truncatedPrompt;
     }
 }
